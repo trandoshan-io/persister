@@ -33,13 +33,6 @@ func main() {
 	}
 	log.Println("Loaded .env file")
 
-	// allow some kind of boot delay to fix usage in docker-compose
-	// TODO: find a better way
-	if startupDelay := os.Getenv("STARTUP_DELAY"); startupDelay != "" {
-		val, _ := strconv.Atoi(startupDelay)
-		time.Sleep(time.Duration(val) * time.Second)
-	}
-
 	// initialize and validate database connection
 	ctx, _ := context.WithTimeout(context.Background(), 2*time.Second)
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(os.Getenv("MONGO_URI")))
