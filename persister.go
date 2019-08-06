@@ -76,14 +76,14 @@ func handleMessages(client *mongo.Client) func(deliveries <-chan amqp.Delivery, 
          // Unmarshal message
          if err := json.Unmarshal(delivery.Body, &data); err != nil {
             log.Println("Error while de-serializing payload: ", err.Error())
-            break
+            continue
          }
 
          // Finally create entry in database
          _, err := contentCollection.InsertOne(context.TODO(), bson.M{"url": data.Url, "data": data.Data})
          if err != nil {
             log.Println("Error while saving content: ", err.Error())
-            break
+            continue
          }
       }
    }
