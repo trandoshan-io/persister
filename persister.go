@@ -56,7 +56,7 @@ func main() {
    if err != nil {
       log.Fatal("Unable to create consumer: ", err.Error())
    }
-   if err := consumer.Consume(contentQueue, true, handleMessages(client)); err != nil {
+   if err := consumer.Consume(contentQueue, false, handleMessages(client)); err != nil {
       log.Fatal("Unable to consume message: ", err.Error())
    }
    log.Println("Consumer initialized successfully")
@@ -76,6 +76,7 @@ func handleMessages(client *mongo.Client) func(deliveries <-chan amqp.Delivery, 
          // Unmarshal message
          if err := json.Unmarshal(delivery.Body, &data); err != nil {
             log.Println("Error while de-serializing payload: ", err.Error())
+            _ = delivery.Reject(false)
             continue
          }
 
@@ -83,8 +84,11 @@ func handleMessages(client *mongo.Client) func(deliveries <-chan amqp.Delivery, 
          _, err := contentCollection.InsertOne(context.TODO(), bson.M{"url": data.Url, "data": data.Data})
          if err != nil {
             log.Println("Error while saving content: ", err.Error())
+            _ = delivery.Reject(false)
             continue
          }
+
+         _ = delivery.Ack(false)
       }
    }
 }
