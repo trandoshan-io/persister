@@ -22,7 +22,7 @@ const (
 
 type WebsiteData struct {
    Url  string `json:"url"`
-   Data string `json:"data"`
+   Content string `json:"content"`
 }
 
 func main() {
@@ -81,7 +81,7 @@ func handleMessages(client *mongo.Client) func(deliveries <-chan amqp.Delivery, 
          }
 
          // Finally create entry in database
-         _, err := contentCollection.InsertOne(context.TODO(), bson.M{"url": data.Url, "crawlDate": time.Now(), "content": data.Data})
+         _, err := contentCollection.InsertOne(context.TODO(), bson.M{"url": data.Url, "crawlDate": time.Now(), "content": data.Content})
          if err != nil {
             log.Println("Error while saving content: ", err.Error())
             _ = delivery.Reject(false)
