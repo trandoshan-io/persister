@@ -20,7 +20,7 @@ const (
    contentQueue = "content"
 )
 
-type WebsiteData struct {
+type PageData struct {
    Url  string `json:"url"`
    Content string `json:"content"`
 }
@@ -44,8 +44,6 @@ func main() {
       log.Fatal("Unable to connect to database: ", err.Error())
    }
 
-   // todo initialize API in goroutine (separate go file)
-
    prefetch, err := strconv.Atoi(os.Getenv("AMQP_PREFETCH"))
    if err != nil {
       log.Fatal(err)
@@ -68,10 +66,10 @@ func main() {
 }
 
 func handleMessages(client *mongo.Client) func(deliveries <-chan amqp.Delivery, done chan error) {
-   contentCollection := client.Database("trandoshan").Collection("content")
+   contentCollection := client.Database("trandoshan").Collection("pages")
    return func(deliveries <-chan amqp.Delivery, done chan error) {
       for delivery := range deliveries {
-         var data WebsiteData
+         var data PageData
 
          // Unmarshal message
          if err := json.Unmarshal(delivery.Body, &data); err != nil {
