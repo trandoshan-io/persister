@@ -66,9 +66,12 @@ func main() {
 }
 
 func handleMessages(client *mongo.Client) func(deliveries <-chan amqp.Delivery, done chan error) {
-   contentCollection := client.Database("trandoshan").Collection("pages")
+   pageCollection := client.Database("trandoshan").Collection("pages")
    return func(deliveries <-chan amqp.Delivery, done chan error) {
       for delivery := range deliveries {
+         // setup production context
+         ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+
          var data PageData
 
          // Unmarshal message
@@ -79,7 +82,7 @@ func handleMessages(client *mongo.Client) func(deliveries <-chan amqp.Delivery, 
          }
 
          // Finally create entry in database
-         _, err := contentCollection.InsertOne(context.TODO(), bson.M{"url": data.Url, "crawlDate": time.Now(), "content": data.Content})
+         _, err := pageCollection.InsertOne(ctx, bson.M{"url": data.Url, "crawlDate": time.Now(), "content": data.Content})
          if err != nil {
             log.Println("Error while saving content: ", err.Error())
             _ = delivery.Reject(false)
