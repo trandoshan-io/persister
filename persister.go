@@ -4,20 +4,19 @@ import (
    "context"
    "encoding/json"
    "github.com/joho/godotenv"
-   "github.com/streadway/amqp"
-   tamqp "github.com/trandoshan-io/amqp"
+   "github.com/nats-io/nats.go"
    "go.mongodb.org/mongo-driver/bson"
    "go.mongodb.org/mongo-driver/mongo"
    "go.mongodb.org/mongo-driver/mongo/options"
    "go.mongodb.org/mongo-driver/mongo/readpref"
    "log"
    "os"
-   "strconv"
    "time"
 )
 
 const (
-   contentQueue = "content"
+   contentQueue   = "contentQueue"
+   contentSubject = "contentSubject"
 )
 
 type PageData struct {
@@ -30,7 +29,7 @@ func main() {
 
    // load .env
    if err := godotenv.Load(); err != nil {
-      log.Fatal("Unable to load .env file: ", err.Error())
+      log.Fatal("Unable to load .env file: ", err)
    }
    log.Println("Loaded .env file")
 
@@ -38,58 +37,53 @@ func main() {
    ctx, _ := context.WithTimeout(context.Background(), 2*time.Second)
    client, err := mongo.Connect(ctx, options.Client().ApplyURI(os.Getenv("MONGO_URI")))
    if err != nil {
-      log.Fatal("Unable to create database connection: ", err.Error())
+      log.Fatal("Unable to create database connection: ", err)
    }
    if err := client.Ping(ctx, readpref.Primary()); err != nil {
-      log.Fatal("Unable to connect to database: ", err.Error())
+      log.Fatal("Unable to connect to database: ", err)
    }
 
-   prefetch, err := strconv.Atoi(os.Getenv("AMQP_PREFETCH"))
+   // connect to NATS server
+   nc, err := nats.Connect(os.Getenv("NATS_URI"))
    if err != nil {
-      log.Fatal(err)
+      log.Fatal("Error while connecting to nats server: ", err)
+   }
+   defer nc.Close()
+
+   // initialize queue subscriber
+   if _, err := nc.QueueSubscribe(contentSubject, contentQueue, handleMessages(client)); err != nil {
+      log.Fatal("Error while trying to subscribe to server: ", err)
    }
 
-   // initialize consumer & start him
-   consumer, err := tamqp.NewConsumer(os.Getenv("AMQP_URI"), prefetch)
-   if err != nil {
-      log.Fatal("Unable to create consumer: ", err.Error())
-   }
-   if err := consumer.Consume(contentQueue, false, handleMessages(client)); err != nil {
-      log.Fatal("Unable to consume message: ", err.Error())
-   }
    log.Println("Consumer initialized successfully")
 
    //TODO: better way
    select {}
-
-   _ = consumer.Shutdown()
 }
 
-func handleMessages(client *mongo.Client) func(deliveries <-chan amqp.Delivery, done chan error) {
+func handleMessages(client *mongo.Client) func(*nats.Msg) {
    pageCollection := client.Database("trandoshan").Collection("pages")
-   return func(deliveries <-chan amqp.Delivery, done chan error) {
-      for delivery := range deliveries {
-         // setup production context
-         ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+   return func(msg *nats.Msg) {
+      // setup production context
+      ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
 
-         var data PageData
+      var data PageData
 
-         // Unmarshal message
-         if err := json.Unmarshal(delivery.Body, &data); err != nil {
-            log.Println("Error while de-serializing payload: ", err.Error())
-            _ = delivery.Reject(false)
-            continue
-         }
+      // Unmarshal message
+      if err := json.Unmarshal(msg.Data, &data); err != nil {
+         log.Println("Error while de-serializing payload: ", err)
+         // todo: store in sort of DLQ?
+         return
+      }
 
-         // Finally create entry in database
-         _, err := pageCollection.InsertOne(ctx, bson.M{"url": data.Url, "crawlDate": time.Now(), "content": data.Content})
-         if err != nil {
-            log.Println("Error while saving content: ", err.Error())
-            _ = delivery.Reject(false)
-            continue
-         }
-
-         _ = delivery.Ack(false)
+      // Finally create entry in database
+      //TODO: extract title from content
+      //TODO: make sure url does not exist before and if so update entry instead
+      _, err := pageCollection.InsertOne(ctx, bson.M{"url": data.Url, "crawlDate": time.Now(), "content": data.Content})
+      if err != nil {
+         log.Println("Error while saving content: ", err)
+         // todo: store in sort of DLQ?
+         return
       }
    }
 }
