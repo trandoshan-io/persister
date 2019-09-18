@@ -3,6 +3,7 @@ package main
 import (
    "context"
    "encoding/json"
+   "fmt"
    "github.com/joho/godotenv"
    "github.com/nats-io/nats.go"
    "go.mongodb.org/mongo-driver/bson"
@@ -11,6 +12,7 @@ import (
    "go.mongodb.org/mongo-driver/mongo/readpref"
    "log"
    "os"
+   "strings"
    "time"
 )
 
@@ -57,7 +59,7 @@ func main() {
 
    log.Println("Consumer initialized successfully")
 
-   //TODO: better way
+   // todo: better way
    select {}
 }
 
@@ -76,14 +78,59 @@ func handleMessages(client *mongo.Client) func(*nats.Msg) {
          return
       }
 
+      // Determinate if entry does not already exist
+      page, err := getPage(client, data.Url)
+      if err != nil {
+         log.Println("Error while checking if url exist. Considering not. (", err, ")")
+      }
+      // there is a previous result
+      if page != nil {
+         // todo: put update with entry lifespan policy ?
+         log.Println("Url: " + data.Url + " is already crawled. Deleting old entry")
+
+         // delete old entry
+         if _, err := pageCollection.DeleteOne(ctx, bson.M{"url": data.Url}); err != nil {
+            log.Println("Error while deleting old entry. Cancelling persist request. (", err, ")")
+            // todo: store in sort of DLQ?
+            return
+         }
+      }
+
       // Finally create entry in database
-      //TODO: extract title from content
-      //TODO: make sure url does not exist before and if so update entry instead
-      _, err := pageCollection.InsertOne(ctx, bson.M{"url": data.Url, "crawlDate": time.Now(), "content": data.Content})
+      _, err = pageCollection.InsertOne(ctx, bson.M{"url": data.Url, "crawlDate": time.Now(), "title": extractTitle(data.Content), "content": data.Content})
       if err != nil {
          log.Println("Error while saving content: ", err)
          // todo: store in sort of DLQ?
          return
       }
    }
+}
+
+// Extract title from given html
+func extractTitle(body string) string {
+   cleanBody := strings.ToLower(body)
+   startPos := strings.Index(cleanBody, "<title>") + len("<title>")
+   endPos := strings.Index(cleanBody, "</title>")
+
+   // html tag absent of malformed
+   if startPos == -1 || endPos == -1 {
+      return ""
+   }
+   return body[startPos:endPos]
+}
+
+// Get page using his url
+// todo: call API instead?
+func getPage(client *mongo.Client, url string) (*PageData, error) {
+   // Setup production context and acquire database collection
+   ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+   pageCollection := client.Database("trandoshan").Collection("pages")
+
+   // Query database for result
+   var page PageData
+   if err := pageCollection.FindOne(ctx, bson.M{"url": url}).Decode(&page); err != nil {
+      return nil, fmt.Errorf("Error while decoding result: " + err.Error())
+   }
+
+   return &page, nil
 }
