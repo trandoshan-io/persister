@@ -4,7 +4,6 @@ import (
    "context"
    "encoding/json"
    "fmt"
-   "github.com/joho/godotenv"
    "github.com/nats-io/nats.go"
    "go.mongodb.org/mongo-driver/bson"
    "go.mongodb.org/mongo-driver/mongo"
@@ -28,12 +27,6 @@ type PageData struct {
 
 func main() {
    log.Println("Initializing persister")
-
-   // load .env
-   if err := godotenv.Load(); err != nil {
-      log.Fatal("Unable to load .env file: ", err)
-   }
-   log.Println("Loaded .env file")
 
    // initialize and validate database connection
    ctx, _ := context.WithTimeout(context.Background(), 2*time.Second)
