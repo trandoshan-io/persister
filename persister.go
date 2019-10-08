@@ -1,129 +1,131 @@
 package main
 
 import (
-   "context"
-   "encoding/json"
-   "fmt"
-   "github.com/nats-io/nats.go"
-   "go.mongodb.org/mongo-driver/bson"
-   "go.mongodb.org/mongo-driver/mongo"
-   "go.mongodb.org/mongo-driver/mongo/options"
-   "go.mongodb.org/mongo-driver/mongo/readpref"
-   "log"
-   "os"
-   "strings"
-   "time"
+	"context"
+	"encoding/json"
+	"fmt"
+	"github.com/nats-io/nats.go"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readpref"
+	"log"
+	"os"
+	"strings"
+	"time"
 )
 
 const (
-   contentQueue   = "contentQueue"
-   contentSubject = "contentSubject"
+	contentQueue   = "contentQueue"
+	contentSubject = "contentSubject"
+
+	trandoshanDatabase = "trandoshan"
+	resourceCollection = "resources"
 )
 
-type PageData struct {
-   Url  string `json:"url"`
-   Content string `json:"content"`
+type resourceData struct {
+	Url     string `json:"url"`
+	Content string `json:"content"`
 }
 
 func main() {
-   log.Println("Initializing persister")
+	log.Print("Initializing persister")
 
-   // initialize and validate database connection
-   ctx, _ := context.WithTimeout(context.Background(), 2*time.Second)
-   client, err := mongo.Connect(ctx, options.Client().ApplyURI(os.Getenv("MONGO_URI")))
-   if err != nil {
-      log.Fatal("Unable to create database connection: ", err)
-   }
-   if err := client.Ping(ctx, readpref.Primary()); err != nil {
-      log.Fatal("Unable to connect to database: ", err)
-   }
+	// initialize and validate database connection
+	ctx, _ := context.WithTimeout(context.Background(), 2*time.Second)
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(os.Getenv("MONGO_URI")))
+	if err != nil {
+		log.Fatalf("Unable to create database connection: %s", err)
+	}
+	if err := client.Ping(ctx, readpref.Primary()); err != nil {
+		log.Fatalf("Unable to connect to database: %s", err)
+	}
 
-   // connect to NATS server
-   nc, err := nats.Connect(os.Getenv("NATS_URI"))
-   if err != nil {
-      log.Fatal("Error while connecting to nats server: ", err)
-   }
-   defer nc.Close()
+	// connect to NATS server
+	nc, err := nats.Connect(os.Getenv("NATS_URI"))
+	if err != nil {
+		log.Fatalf("Error while connecting to nats server: %s", err)
+	}
+	defer nc.Close()
 
-   // initialize queue subscriber
-   if _, err := nc.QueueSubscribe(contentSubject, contentQueue, handleMessages(client)); err != nil {
-      log.Fatal("Error while trying to subscribe to server: ", err)
-   }
+	// initialize queue subscriber
+	if _, err := nc.QueueSubscribe(contentSubject, contentQueue, handleMessages(client)); err != nil {
+		log.Fatalf("Error while trying to subscribe to server: %s", err)
+	}
 
-   log.Println("Consumer initialized successfully")
+	log.Print("Consumer initialized successfully")
 
-   // todo: better way
-   select {}
+	// todo: better way
+	select {}
 }
 
 func handleMessages(client *mongo.Client) func(*nats.Msg) {
-   pageCollection := client.Database("trandoshan").Collection("pages")
-   return func(msg *nats.Msg) {
-      // setup production context
-      ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+	resourceCollection := client.Database(trandoshanDatabase).Collection(resourceCollection)
+	return func(msg *nats.Msg) {
+		// setup production context
+		ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
 
-      var data PageData
+		var data resourceData
 
-      // Unmarshal message
-      if err := json.Unmarshal(msg.Data, &data); err != nil {
-         log.Println("Error while de-serializing payload: ", err)
-         // todo: store in sort of DLQ?
-         return
-      }
+		// Unmarshal message
+		if err := json.Unmarshal(msg.Data, &data); err != nil {
+			log.Printf("Error while de-serializing payload: %sf", err)
+			// todo: store in sort of DLQ?
+			return
+		}
 
-      // Determinate if entry does not already exist
-      page, err := getPage(client, data.Url)
-      if err != nil {
-         log.Println("Error while checking if url exist. Considering not. (", err, ")")
-      }
-      // there is a previous result
-      if page != nil {
-         // todo: put update with entry lifespan policy ?
-         log.Println("Url: " + data.Url + " is already crawled. Deleting old entry")
+		// Determinate if entry does not already exist
+		resource, err := getResource(client, data.Url)
+		if err != nil {
+			log.Printf("Error while checking if url exist. Considering not. %s", err)
+		}
+		// there is a previous result
+		if resource != nil {
+			log.Printf("Url: %s is already crawled. Deleting old entry", data.Url)
 
-         // delete old entry
-         if _, err := pageCollection.DeleteOne(ctx, bson.M{"url": data.Url}); err != nil {
-            log.Println("Error while deleting old entry. Cancelling persist request. (", err, ")")
-            // todo: store in sort of DLQ?
-            return
-         }
-      }
+			// delete old entry
+			if _, err := resourceCollection.DeleteOne(ctx, bson.M{"url": data.Url}); err != nil {
+				log.Printf("Error while deleting old entry. Cancelling persist request. %s", err)
+				// todo: store in sort of DLQ?
+				return
+			}
+		}
 
-      // Finally create entry in database
-      _, err = pageCollection.InsertOne(ctx, bson.M{"url": data.Url, "crawlDate": time.Now(), "title": extractTitle(data.Content), "content": data.Content})
-      if err != nil {
-         log.Println("Error while saving content: ", err)
-         // todo: store in sort of DLQ?
-         return
-      }
-   }
+		// Finally create entry in database
+		_, err = resourceCollection.InsertOne(ctx, bson.M{"url": data.Url, "crawlDate": time.Now(), "title": extractTitle(data.Content), "content": data.Content})
+		if err != nil {
+			log.Printf("Error while saving content: %s", err)
+			// todo: store in sort of DLQ?
+			return
+		}
+	}
 }
 
 // Extract title from given html
 func extractTitle(body string) string {
-   cleanBody := strings.ToLower(body)
-   startPos := strings.Index(cleanBody, "<title>") + len("<title>")
-   endPos := strings.Index(cleanBody, "</title>")
+	cleanBody := strings.ToLower(body)
+	startPos := strings.Index(cleanBody, "<title>") + len("<title>")
+	endPos := strings.Index(cleanBody, "</title>")
 
-   // html tag absent of malformed
-   if startPos == -1 || endPos == -1 {
-      return ""
-   }
-   return body[startPos:endPos]
+	// html tag absent of malformed
+	if startPos == -1 || endPos == -1 {
+		return ""
+	}
+	return body[startPos:endPos]
 }
 
-// Get page using his url
+// Get resource using his url
 // todo: call API instead?
-func getPage(client *mongo.Client, url string) (*PageData, error) {
-   // Setup production context and acquire database collection
-   ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
-   pageCollection := client.Database("trandoshan").Collection("pages")
+func getResource(client *mongo.Client, url string) (*resourceData, error) {
+	// Setup production context and acquire database collection
+	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+	resourceCollection := client.Database(trandoshanDatabase).Collection(resourceCollection)
 
-   // Query database for result
-   var page PageData
-   if err := pageCollection.FindOne(ctx, bson.M{"url": url}).Decode(&page); err != nil {
-      return nil, fmt.Errorf("Error while decoding result: " + err.Error())
-   }
+	// Query database for result
+	var resource resourceData
+	if err := resourceCollection.FindOne(ctx, bson.M{"url": url}).Decode(&resource); err != nil {
+		return nil, fmt.Errorf("error while decoding result: %s", err)
+	}
 
-   return &page, nil
+	return &resource, nil
 }
