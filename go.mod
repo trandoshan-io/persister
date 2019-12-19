@@ -3,8 +3,7 @@ module github.com/trandoshan-io/persister
 go 1.13
 
 require (
+	github.com/DataDog/zstd v1.4.4 // indirect
 	github.com/go-stack/stack v1.8.0 // indirect
-	github.com/nats-io/nats-server/v2 v2.1.0 // indirect
-	github.com/nats-io/nats.go v1.8.1
-	go.mongodb.org/mongo-driver v1.1.2
+	github.com/nats-io/nats.go v1.9.1
 )

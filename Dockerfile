@@ -1,5 +1,5 @@
 # build image
-FROM golang:1.13.1-alpine3.10 as builder
+FROM golang:1.13.5-alpine3.10 as builder
 
 RUN apk update && apk upgrade && \
     apk add --no-cache bash git openssh
@@ -9,7 +9,7 @@ WORKDIR /app
 
 # Test then build app
 RUN CGO_ENABLED=0 go test -v
-RUN go build -v persister.go
+RUN go build -v
 
 
 # runtime image
