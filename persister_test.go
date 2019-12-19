@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -35,18 +35,18 @@ func TestExtractTitleNotPresent(t *testing.T) {
 
 func TestComputePathNoExtension(t *testing.T) {
 	currentTime := time.Now()
-	path := computePath("https://private.creekorful.fr/something/strange/", currentTime)
+	path, fileName := computePath("https://private.creekorful.fr/something/strange/", currentTime)
 
-	if path != fmt.Sprintf("private.creekorful.fr/something/strange/%d", currentTime.Unix()) {
+	if path != "private.creekorful.fr/something/strange" || fileName != strconv.FormatInt(currentTime.Unix(), 10) {
 		t.Errorf("Computed path is wrong")
 	}
 }
 
 func TestComputePathWithExtension(t *testing.T) {
 	currentTime := time.Now()
-	path := computePath("http://private.creekorful.fr/something/strange/index.php", currentTime)
+	path, fileName := computePath("http://private.creekorful.fr/something/strange/index.php", currentTime)
 
-	if path != fmt.Sprintf("private.creekorful.fr/something/strange/index.php/%d", currentTime.Unix()) {
+	if path != "private.creekorful.fr/something/strange/index.php" || fileName != strconv.FormatInt(currentTime.Unix(), 10) {
 		t.Errorf("Computed path is wrong")
 	}
 }
